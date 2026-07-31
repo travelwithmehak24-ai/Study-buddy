@@ -5,6 +5,7 @@ import json
 import time
 import subprocess
 import sys
+from dotenv import load_dotenv
 from datetime import datetime
 from groq import Groq
 from pypdf import PdfReader
