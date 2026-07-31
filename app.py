@@ -117,25 +117,95 @@ if menu == "📁 Study Materials":
                     st.markdown(st.session_state.memory['past_paper_analysis'])
 
 # FEATURE: SMART QUIZ
+# FEATURE: SMART QUIZ (Strict Workflow)
 elif menu == "🧠 Smart Quiz":
-    st.header("🧠 Diagnostic Smart Quiz")
-    if not st.session_state.memory['syllabus']:
-        st.warning("Upload a syllabus first!")
-    else:
-        if st.button("Generate Targeted Quiz"):
-            prompt = f"Context: {st.session_state.memory['past_paper_analysis']}. Syllabus: {st.session_state.memory['syllabus'][:2000]}. Generate 5 challenging questions based on high-yield topics."
-            res = client.chat.completions.create(messages=[{"role": "user", "content": prompt}], model="llama-3.3-70b-versatile")
-            st.session_state.current_quiz = res.choices[0].message.content
+    st.header("🧠 High-Yield Diagnostic Test")
+    st.write("The Agent will generate a test based on your syllabus. No answers will be shown until you submit your work.")
+
+    # Initialize session states so data doesn't disappear
+    if 'current_quiz' not in st.session_state: st.session_state.current_quiz = None
+    if 'quiz_step' not in st.session_state: st.session_state.quiz_step = 1 # 1=Generate, 2=Solving
+
+    # --- STEP 1: GENERATE ---
+    if st.session_state.quiz_step == 1:
+        if st.button("Generate High-Yield Test 🎲"):
+            if not st.session_state.memory['syllabus']:
+                st.warning("Please upload a syllabus in 'Study Materials' first!")
+            else:
+                with st.spinner("Agent is designing a strict exam..."):
+                    prompt = f"""
+                    Act as a Strict Examiner. Based on:
+                    Syllabus: {st.session_state.memory['syllabus'][:3000]}
+                    High-Yield Topics: {st.session_state.memory['past_paper_analysis']}
+                    
+                    Generate 5 challenging questions. 
+                    - Use a mix of MCQ and Short Answer.
+                    - DO NOT provide any answers, hints, or explanations. 
+                    - Just list the questions clearly.
+                    """
+                    res = client.chat.completions.create(messages=[{"role": "user", "content": prompt}], model="llama-3.3-70b-versatile")
+                    st.session_state.current_quiz = res.choices[0].message.content
+                    st.session_state.quiz_step = 2
+                    st.rerun()
+
+    # --- STEP 2: SOLVING & UPLOADING ---
+    if st.session_state.quiz_step == 2 and st.session_state.current_quiz:
+        st.markdown("### 📝 THE QUESTIONS")
+        st.info("Write your answers on paper or type them below. Do not refresh the page.")
+        st.markdown(st.session_state.current_quiz)
+        
+        st.markdown("---")
+        st.subheader("📤 Submit Your Work")
+        
+        # Option to either Type or Upload
+        sub_type = st.radio("How will you submit?", ["Type Answers", "Upload PDF of Answers"])
+        
+        user_content = ""
+        if sub_type == "Type Answers":
+            user_content = st.text_area("Type your answers here:", height=300, placeholder="Q1: ... \nQ2: ...")
+        else:
+            ans_file = st.file_uploader("Upload your handwritten/typed answers (PDF)", type=['pdf'])
+            if ans_file:
+                with st.spinner("Agent is reading your file..."):
+                    user_content = extract_text(ans_file)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Submit for Grading 🚀"):
+                if not user_content:
+                    st.error("Please provide your answers first!")
+                else:
+                    with st.spinner("Chief Examiner is analyzing your logic..."):
+                        eval_prompt = f"""
+                        You are a strict academic grader.
+                        QUESTIONS: {st.session_state.current_quiz}
+                        STUDENT ANSWERS: {user_content}
+                        SYLLABUS CONTEXT: {st.session_state.memory['syllabus'][:4000]}
+                        
+                        Provide a detailed report:
+                        1. MARKS: [X/10]
+                        2. ACCURACY: [What was correct vs incorrect?]
+                        3. CONCEPTUAL GAPS: [Why were the answers wrong?]
+                        4. REVISION LIST: [What specific sub-topics from the syllabus should be re-studied?]
+                        """
+                        eval_res = client.chat.completions.create(messages=[{"role": "user", "content": eval_prompt}], model="llama-3.3-70b-versatile")
+                        st.session_state.quiz_result = eval_res.choices[0].message.content
+                        st.session_state.quiz_step = 3
+                        st.rerun()
+        with col2:
+            if st.button("Cancel & Reset"):
+                st.session_state.quiz_step = 1
+                st.session_state.current_quiz = None
+                st.rerun()
+
+    # --- STEP 3: RESULTS ---
+    if st.session_state.quiz_step == 3:
+        st.header("📊 Results & Diagnostic")
+        st.markdown(st.session_state.quiz_result)
+        if st.button("Back to New Quiz"):
+            st.session_state.quiz_step = 1
+            st.session_state.current_quiz = None
             st.rerun()
-            
-        if 'current_quiz' in st.session_state:
-            st.markdown(st.session_state.current_quiz)
-            with st.form("quiz_form"):
-                ans = st.text_area("Your Answers:")
-                if st.form_submit_button("Submit for Grading"):
-                    eval_p = f"Grade these answers: {ans} against this quiz: {st.session_state.current_quiz}. Be strict."
-                    grade = client.chat.completions.create(messages=[{"role": "user", "content": eval_p}], model="llama-3.3-70b-versatile")
-                    st.markdown(grade.choices[0].message.content)
 
 # FEATURE: EXAM SIMULATION
 elif menu == "📝 Exam Simulation":
