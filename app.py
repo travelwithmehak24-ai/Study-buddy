@@ -15,18 +15,32 @@ st.set_page_config(page_title="StudySphere Pro", page_icon="🏆", layout="wide"
 MEMORY_FILE = "student_memory.json"
 
 def load_memory():
-    if os.path.exists(MEMORY_FILE):
-        try:
-            with open(MEMORY_FILE, "r") as f:
-                return json.load(f)
-        except: pass
-    return {
+    # Define the "Perfect" default structure
+    defaults = {
         "user_name": "Student", 
         "exam_profile": {"date": str(datetime.now().date()), "marks": 100, "pattern": "Mixed", "duration": 180},
         "syllabus": "", 
         "past_paper_analysis": "", 
         "progress": []
     }
+    
+    if os.path.exists(MEMORY_FILE):
+        try:
+            with open(MEMORY_FILE, "r") as f:
+                stored_data = json.load(f)
+                # This line MERGES the old file with the new defaults
+                # If a key (like 'date') is missing, it adds it automatically
+                for key, value in defaults.items():
+                    if key not in stored_data:
+                        stored_data[key] = value
+                    if key == 'exam_profile': # Special check for the sub-dictionary
+                        for subkey, subval in defaults['exam_profile'].items():
+                            if subkey not in stored_data['exam_profile']:
+                                stored_data['exam_profile'][subkey] = subval
+                return stored_data
+        except: 
+            return defaults
+    return defaults
 
 def save_memory(data):
     with open(MEMORY_FILE, "w") as f:
