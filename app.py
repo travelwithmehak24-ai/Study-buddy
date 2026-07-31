@@ -115,14 +115,84 @@ elif menu == "📝 Note Summarizer":
             st.markdown(res.choices[0].message.content)
 
 # FEATURE: QUIZ
+# --- ADVANCED QUIZ GENERATOR ---
 elif menu == "🧠 Quiz Generator":
-    st.header("🧠 Quiz Generator")
-    up_file = st.file_uploader("Upload PDF for Quiz", type=['pdf'])
-    if st.button("Generate Quiz"):
+    st.header("🧠 Smart Quiz & Diagnostic")
+    st.write("Upload material, take the test, and let the AI find your weak spots.")
+
+    # We use session_state so the quiz doesn't disappear when you type
+    if 'quiz_questions' not in st.session_state:
+        st.session_state.quiz_questions = None
+    if 'quiz_submitted' not in st.session_state:
+        st.session_state.quiz_submitted = False
+
+    up_file = st.file_uploader("Upload PDF for Diagnostic Quiz", type=['pdf'], key="quiz_up")
+
+    if st.button("Generate New Quiz 🎲"):
         if up_file:
-            text = extract_text_from_pdf(up_file)
-            res = client.chat.completions.create(messages=[{"role": "user", "content": f"Quiz me on: {text[:8000]}"}], model="llama-3.3-70b-versatile")
-            st.markdown(res.choices[0].message.content)
+            with st.spinner("Agent is reading and writing questions..."):
+                text = extract_text_from_pdf(up_file)
+                # We ask for a mix of types
+                prompt = f"""
+                Act as a strict professor. Based on this text: {text[:8000]}, 
+                generate 5 challenging questions:
+                - 2 Multiple Choice Questions (MCQ)
+                - 3 Short Answer Questions
+                
+                Format: 
+                Question 1: [Text]
+                Question 2: [Text]...
+                Do NOT provide the answers yet.
+                """
+                res = client.chat.completions.create(messages=[{"role": "user", "content": prompt}], model="llama-3.3-70b-versatile")
+                st.session_state.quiz_questions = res.choices[0].message.content
+                st.session_state.quiz_submitted = False
+                st.rerun()
+        else:
+            st.warning("Please upload a PDF first.")
+
+    # If quiz is generated, show it
+    if st.session_state.quiz_questions:
+        st.markdown("---")
+        st.markdown(st.session_state.quiz_questions)
+        
+        st.subheader("Your Answers")
+        with st.form("quiz_form"):
+            user_ans_1 = st.text_input("Answer for Question 1")
+            user_ans_2 = st.text_input("Answer for Question 2")
+            user_ans_3 = st.text_input("Answer for Question 3")
+            user_ans_4 = st.text_input("Answer for Question 4")
+            user_ans_5 = st.text_input("Answer for Question 5")
+            
+            submit_quiz = st.form_submit_button("Submit & Analyze Results 🚀")
+
+        if submit_quiz:
+            st.session_state.quiz_submitted = True
+            all_answers = f"Q1: {user_ans_1}\nQ2: {user_ans_2}\nQ3: {user_ans_3}\nQ4: {user_ans_4}\nQ5: {user_ans_5}"
+            
+            # THE EVALUATION PROMPT
+            eval_prompt = f"""
+            You are a tutor grading a quiz.
+            Original Material: {st.session_state.memory['syllabus'][:4000]}
+            Questions: {st.session_state.quiz_questions}
+            Student's Answers: {all_answers}
+            
+            Provide a report in this EXACT format:
+            1. SCORE: [X/5]
+            2. DETAILED FEEDBACK: [Explain mistakes for each question]
+            3. REVISION MAP: [List 3 specific topics the student struggled with and should re-read]
+            4. MOTIVATION: [A quick encouraging word]
+            """
+            
+            with st.spinner("Agent is grading your work..."):
+                eval_res = client.chat.completions.create(messages=[{"role": "user", "content": eval_prompt}], model="llama-3.3-70b-versatile")
+                st.markdown("---")
+                st.header("📊 Your Diagnostic Report")
+                st.markdown(eval_res.choices[0].message.content)
+                
+                # Save this to the Agent's history
+                st.session_state.memory['progress'].append(f"Took a quiz. Result: {eval_res.choices[0].message.content[:100]}...")
+                save_memory(st.session_state.memory)
 
 # FEATURE: ESSAY
 elif menu == "✍️ Essay Polisher":
