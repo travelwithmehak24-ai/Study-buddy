@@ -2,118 +2,143 @@ import streamlit as st
 import pandas as pd
 import os
 import json
+import time
+import subprocess
+import sys
 from datetime import datetime
 from groq import Groq
 from pypdf import PdfReader
 
-# --- 1. CONFIG & MEMORY ENGINE ---
-st.set_page_config(page_title="StudySphere Agent", page_icon="🤖", layout="wide")
-api_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
-client = Groq(api_key=api_key)
+# --- 1. INITIAL SETUP & MEMORY ---
+st.set_page_config(page_title="StudySphere Master AI", page_icon="🎓", layout="wide")
 
-# Function to load/save student memory
+# Function to manage long-term memory
 MEMORY_FILE = "student_memory.json"
 
 def load_memory():
     if os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, "r") as f:
-            return json.load(f)
-    return {"user_name": "Student", "syllabus": "", "progress": [], "goals": []}
+        try:
+            with open(MEMORY_FILE, "r") as f:
+                return json.load(f)
+        except: pass
+    return {"user_name": "Student", "syllabus": "", "progress": [], "notes": ""}
 
 def save_memory(data):
     with open(MEMORY_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
+# Extract PDF Text
 def extract_text_from_pdf(file):
     reader = PdfReader(file)
     return "".join([page.extract_text() for page in reader.pages])
 
-# Initialize Memory
+# Initialize Session
 if 'memory' not in st.session_state:
     st.session_state.memory = load_memory()
 
-# --- 2. SIDEBAR AGENT SETTINGS ---
+load_dotenv()
+api_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
+client = Groq(api_key=api_key)
+
+# --- 2. SIDEBAR NAVIGATION ---
 with st.sidebar:
-    st.title("🤖 Study Agent")
-    user_name = st.text_input("What's your name?", value=st.session_state.memory['user_name'])
-    if user_name != st.session_state.memory['user_name']:
-        st.session_state.memory['user_name'] = user_name
-        save_memory(st.session_state.memory)
+    st.title("🎓 StudySphere Master")
+    
+    # Global User Settings
+    st.session_state.memory['user_name'] = st.text_input("Student Name", st.session_state.memory['user_name'])
     
     st.markdown("---")
-    menu = st.radio("Agent Tasks", ["Daily Check-in", "Upload Syllabus", "Progress Report"])
+    # THE MASTER MENU
+    menu = st.radio("Navigation", [
+        "🤖 Personal AI Agent", 
+        "📅 Study Planner", 
+        "📝 Note Summarizer", 
+        "🧠 Quiz Generator", 
+        "✍️ Essay Polisher", 
+        "⏳ Focus Timer"
+    ])
     
-    if st.button("Reset Agent Memory", type="primary"):
-        st.session_state.memory = {"user_name": user_name, "syllabus": "", "progress": [], "goals": []}
+    if st.button("Clear All Memory", type="primary"):
+        st.session_state.memory = {"user_name": "Student", "syllabus": "", "progress": [], "notes": ""}
         save_memory(st.session_state.memory)
         st.rerun()
 
-# --- 3. MAIN AGENT LOGIC ---
+# --- 3. FEATURE LOGIC ---
 
-# TASK A: UPLOAD SYLLABUS (The Agent's Knowledge)
-if menu == "Upload Syllabus":
-    st.header("📚 Teach the Agent your Syllabus")
-    st.write("Upload your course PDF so the agent knows exactly what you need to learn.")
+# FEATURE: PERSONAL AGENT (The Brain)
+if menu == "🤖 Personal AI Agent":
+    st.header(f"🤖 Hey {st.session_state.memory['user_name']}, I'm your Study Agent.")
     
-    uploaded_syllabus = st.file_uploader("Upload Syllabus (PDF)", type=['pdf'])
-    if st.button("Train Agent"):
-        if uploaded_syllabus:
-            text = extract_text_from_pdf(uploaded_syllabus)
-            st.session_state.memory['syllabus'] = text[:10000] # Save first 10k chars
-            save_memory(st.session_state.memory)
-            st.success("Agent has learned your syllabus!")
-        else:
-            st.error("Please upload a PDF.")
-
-# TASK B: DAILY CHECK-IN (The Agent's Interaction)
-elif menu == "Daily Check-in":
-    st.header(f"👋 Welcome back, {st.session_state.memory['user_name']}!")
-    
-    # The Agent's current "State"
-    last_update = st.session_state.memory['progress'][-1] if st.session_state.memory['progress'] else "No progress yet."
-    st.info(f"📍 Last Update: {last_update}")
-
-    chat_input = st.chat_input("Tell the agent what you studied today or ask for a task...")
-    
-    if chat_input:
-        # Construct the Agent's prompt with Memory
-        system_prompt = f"""
-        You are a Student Success Agent. 
-        User Name: {st.session_state.memory['user_name']}
-        Current Syllabus: {st.session_state.memory['syllabus'][:2000]}
-        Previous Progress: {st.session_state.memory['progress']}
+    col1, col2 = st.columns([2,1])
+    with col1:
+        st.write("I remember your syllabus and your progress. What's on your mind?")
+        chat_input = st.chat_input("Ask me anything about your studies...")
         
-        Task: 1. Acknowledge the user's progress. 2. If they finished a task, update their status. 
-        3. Suggest the next logical step from the syllabus. 4. Be encouraging.
-        """
-        
-        with st.chat_message("assistant"):
+        if chat_input:
+            system_msg = f"User: {st.session_state.memory['user_name']}. Syllabus: {st.session_state.memory['syllabus'][:1000]}. History: {st.session_state.memory['progress'][-3:]}"
             res = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": chat_input}
-                ],
+                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": chat_input}],
                 model="llama-3.3-70b-versatile"
             )
-            response = res.choices[0].message.content
-            st.write(response)
-            
-            # Save this to memory automatically
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-            st.session_state.memory['progress'].append(f"{timestamp}: {chat_input}")
+            st.chat_message("assistant").write(res.choices[0].message.content)
+            st.session_state.memory['progress'].append(f"{datetime.now().strftime('%m/%d')}: {chat_input}")
             save_memory(st.session_state.memory)
 
-# TASK C: PROGRESS REPORT
-elif menu == "Progress Report":
-    st.header("📊 Your Study Journey")
-    if not st.session_state.memory['progress']:
-        st.write("No progress recorded yet. Start a Daily Check-in!")
-    else:
-        df = pd.DataFrame(st.session_state.memory['progress'], columns=["Activity History"])
-        st.table(df)
-        
-        # AI Analysis of progress
-        if st.button("Analyze my consistency"):
-            prompt = f"Analyze this study history and give a grade on consistency and focus: {st.session_state.memory['progress']}"
-            res = client.chat.completions.create(messages=[{"role": "user", "content": prompt}], model="llama-3.3-70b-versatile")
-            st.write(res.choices[0].message.content)
+    with col2:
+        st.subheader("📁 Training")
+        up_syl = st.file_uploader("Upload Syllabus (PDF)", type=['pdf'])
+        if st.button("Teach Agent Syllabus"):
+            if up_syl:
+                st.session_state.memory['syllabus'] = extract_text_from_pdf(up_syl)
+                save_memory(st.session_state.memory)
+                st.success("Syllabus Saved!")
+
+# FEATURE: PLANNER
+elif menu == "📅 Study Planner":
+    st.header("📅 AI Study Planner")
+    subject = st.text_input("What subject?")
+    exam_date = st.date_input("Exam Date")
+    if st.button("Create Plan"):
+        prompt = f"Create a study plan for {subject} until {exam_date}. Context: {st.session_state.memory['syllabus'][:500]}"
+        res = client.chat.completions.create(messages=[{"role": "user", "content": prompt}], model="llama-3.3-70b-versatile")
+        st.markdown(res.choices[0].message.content)
+
+# FEATURE: SUMMARIZER
+elif menu == "📝 Note Summarizer":
+    st.header("📝 AI Summarizer")
+    up_file = st.file_uploader("Upload PDF to Summarize", type=['pdf'])
+    if st.button("Summarize"):
+        if up_file:
+            text = extract_text_from_pdf(up_file)
+            res = client.chat.completions.create(messages=[{"role": "user", "content": f"Summarize: {text[:8000]}"}], model="llama-3.3-70b-versatile")
+            st.markdown(res.choices[0].message.content)
+
+# FEATURE: QUIZ
+elif menu == "🧠 Quiz Generator":
+    st.header("🧠 Quiz Generator")
+    up_file = st.file_uploader("Upload PDF for Quiz", type=['pdf'])
+    if st.button("Generate Quiz"):
+        if up_file:
+            text = extract_text_from_pdf(up_file)
+            res = client.chat.completions.create(messages=[{"role": "user", "content": f"Quiz me on: {text[:8000]}"}], model="llama-3.3-70b-versatile")
+            st.markdown(res.choices[0].message.content)
+
+# FEATURE: ESSAY
+elif menu == "✍️ Essay Polisher":
+    st.header("✍️ Essay Polisher")
+    draft = st.text_area("Paste draft:")
+    if st.button("Polish"):
+        res = client.chat.completions.create(messages=[{"role": "user", "content": f"Improve this: {draft}"}], model="llama-3.3-70b-versatile")
+        st.write(res.choices[0].message.content)
+
+# FEATURE: TIMER
+elif menu == "⏳ Focus Timer":
+    st.header("⏳ Focus Timer")
+    mins = st.number_input("Minutes", 25)
+    if st.button("Start"):
+        ph = st.empty()
+        for i in range(mins * 60, 0, -1):
+            m, s = divmod(i, 60)
+            ph.metric("Remaining", f"{m:02d}:{s:02d}")
+            time.sleep(1)
+        st.balloons()
